@@ -37,7 +37,7 @@ class APIStatusError(Exception):
     def __str__(self):
         """Строковое представление исключения."""
         return (f'Эндпоинт {self.url} недоступен. '
-                'Код ответа API:{self.status_code}')
+                f'Код ответа API:{self.status_code}')
 
 
 class FormatError(Exception):

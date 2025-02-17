@@ -45,16 +45,15 @@ def check_tokens():
         'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
         'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
         'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID
-    }   
-    for name, var in ENV_VARS.items():
-        if not var:
-            error = (
-                f'Отсутствует обязательная переменная окружения: \'{name}\'.'
-                '\nПрограмма принудительно остановлена.'
-            )
-            logging.critical(error)
-            raise ValueError(error)
-                
+    }
+    try:
+        for name, var in ENV_VARS.items():
+            if not var:
+                raise EmptyEnvironmentError(name)
+    except EmptyEnvironmentError as error:
+        logging.critical(error)
+        raise ValueError(error)
+
 
 def send_message(bot, message):
     """Функция отправляет сообщение в Telegram-чат.
@@ -136,7 +135,7 @@ def parse_status(homework):
 
 def main():
     """Основная логика работы бота."""
-    check_tokens()   
+    check_tokens()
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
     VERDICT = ''
