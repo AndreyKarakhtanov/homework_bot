@@ -104,11 +104,7 @@ def check_response(response):
                             ' данные приходят не в виде списка')
     except KeyError:
         raise KeyError('Ключ \'homework\' не найден')
-    try:
-        homework = homeworks[0]
-    except IndexError:
-        raise IndexError('Список домашних заданий пустой')
-    return homework
+    return homeworks
 
 
 def parse_status(homework):
@@ -138,17 +134,15 @@ def main():
     check_tokens()
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
-    VERDICT = ''
     LAST_ERROR = ''
     while True:
         try:
             response = get_api_answer(timestamp)
-            homework = check_response(response)
-            message = parse_status(homework)
-            if message != VERDICT:
+            homeworks = check_response(response)
+            if len(homeworks) > 0:
+                message = parse_status(homeworks[0])
                 timestamp = response.get('current_date')
                 send_message(bot, message)
-                VERDICT = message
             else:
                 logging.debug('Статус домашней работы не измененился')
         except Exception as error:
