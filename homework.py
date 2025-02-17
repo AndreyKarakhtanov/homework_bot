@@ -15,11 +15,6 @@ load_dotenv()
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-ENV_VARS = {
-    'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
-    'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
-    'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID
-}
 RETRY_PERIOD = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
@@ -46,15 +41,20 @@ def check_tokens():
     Если отсутствует хотя бы одна переменная окружения — продолжать работу
     бота нет смысла.
     """
+    ENV_VARS = {
+        'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
+        'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
+        'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID
+    }   
     for name, var in ENV_VARS.items():
-        try:
-            if not var:
-                raise EmptyEnvironmentError(name)
-        except EmptyEnvironmentError as error:
+        if not var:
+            error = (
+                f'Отсутствует обязательная переменная окружения: \'{name}\'.'
+                '\nПрограмма принудительно остановлена.'
+            )
             logging.critical(error)
-            return False
-    return True
-
+            raise ValueError(error)
+                
 
 def send_message(bot, message):
     """Функция отправляет сообщение в Telegram-чат.
@@ -136,20 +136,18 @@ def parse_status(homework):
 
 def main():
     """Основная логика работы бота."""
-    if not check_tokens():
-        sys.exit()
+    check_tokens()   
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
     VERDICT = ''
     LAST_ERROR = ''
-    LAST_TIMESTUMP = timestamp
     while True:
         try:
-            response = get_api_answer(LAST_TIMESTUMP)
-            LAST_TIMESTUMP = int(time.time())
+            response = get_api_answer(timestamp)
             homework = check_response(response)
             message = parse_status(homework)
             if message != VERDICT:
+                timestamp = response.get('current_date')
                 send_message(bot, message)
                 VERDICT = message
             else:
