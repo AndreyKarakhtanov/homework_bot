@@ -5,11 +5,14 @@ import time
 from http import HTTPStatus
 
 import requests
+from contextlib import suppress
 from dotenv import load_dotenv
+from telebot import TeleBot, apihelper
+
 from exceptions import (
-    APIError, APIStatusError, EmptyEnvironmentError, FormatError
+    APIStatusError, EmptyEnvironmentError
 )
-from telebot import TeleBot
+
 
 load_dotenv()
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
@@ -23,16 +26,6 @@ HOMEWORK_VERDICTS = {
     'reviewing': 'Работа взята на проверку ревьюером.',
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
-logging.basicConfig(
-    stream=sys.stdout,
-    level=logging.DEBUG,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    encoding="UTF-8"
-)
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler(sys.stdout)
-logger.addHandler(handler)
 
 
 def check_tokens():
@@ -46,13 +39,17 @@ def check_tokens():
         'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
         'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID
     }
-    try:
-        for name, var in ENV_VARS.items():
-            if not var:
-                raise EmptyEnvironmentError(name)
-    except EmptyEnvironmentError as error:
-        logging.critical(error)
-        raise ValueError(error)
+    empty_env_vars = []
+    for name, var in ENV_VARS.items():
+        if not var:
+            empty_env_vars.append(name)
+    if empty_env_vars:
+        for var in empty_env_vars:
+            error = (
+                f'Отсутствует обязательная переменная окружения: "{var}".'
+            )
+            logging.critical(error)
+        raise EmptyEnvironmentError('Программа принудительно остановлена.')
 
 
 def send_message(bot, message):
@@ -61,11 +58,9 @@ def send_message(bot, message):
     Определяется переменной окружения TELEGRAM_CHAT_ID. Принимает на вход два
     параметра: экземпляркласса TeleBot и строку с текстом сообщения.
     """
-    try:
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-        logging.debug(f'Бот отправил сообщение \'{message}\'')
-    except Exception:
-        logging.error('Ошибка отправки сообщения.')
+    logging.debug('Подготовка отправки сообщения...')
+    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+    logging.debug(f'Бот отправил сообщение: "{message}"')
 
 
 def get_api_answer(timestamp):
@@ -75,18 +70,21 @@ def get_api_answer(timestamp):
     В случае успешного запроса должна вернуть ответ API,
     приведя его из формата JSON к типам данных Python.
     """
+    logging.debug(f'Подготовка запроса к эндпоинту: {ENDPOINT} ...')
     payload = {'from_date': f'{timestamp}'}
-    headers = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
     try:
-        response = requests.get(ENDPOINT, headers=headers, params=payload)
-    except Exception as error:
-        raise APIError(ENDPOINT, error)
+        response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
+    except requests.RequestException as error:
+        raise ConnectionError(
+            f'Ошибка доступа к Эндпоинту {ENDPOINT}: {error}'
+        )
     if response.status_code != HTTPStatus.OK:
-        raise APIStatusError(ENDPOINT, response.status_code)
-    try:
-        return response.json()
-    except Exception:
-        raise FormatError
+        raise APIStatusError(
+            f'Эндпоинт {ENDPOINT} недоступен. '
+            f'Код ответа API: {response.status_code}.'
+        )
+    logging.debug(f'Получен ответ от эндпоинта: {ENDPOINT}')
+    return response.json()
 
 
 def check_response(response):
@@ -95,37 +93,48 @@ def check_response(response):
     В качестве параметра функция получает ответ API, приведённый к типам
     данных Python.
     """
+    logging.debug('Проверки ответа API на соответствие документации...')
     if not isinstance(response, dict):
-        raise TypeError('Ответ API не соответствует типу \'dict\'')
-    try:
-        homeworks = response.get('homeworks')
-        if not isinstance(homeworks, list):
-            raise TypeError('В ответе API домашки под ключом \'homeworks\''
-                            ' данные приходят не в виде списка')
-    except KeyError:
-        raise KeyError('Ключ \'homework\' не найден')
+        raise TypeError(
+            'Ответ API не соответствует типу "dict". '
+            f'Полученный тип: {type(response)}'
+        )
+    homeworks = response.get('homeworks')
+    if not isinstance(homeworks, list):
+        raise TypeError(
+            'В ответе API домашки под ключом "homeworks" '
+            'данные не соответствует типу "list". '
+            f'Полученный тип: {type(response)}'
+        )
+    logging.debug('Проверки ответа API заверешена...')
     return homeworks
 
 
 def parse_status(homework):
-    """Функция извлечения из информации статусе домашней работы.
+    """Функция извлечения статуса из информации о домашней работе.
 
     В качестве параметра функция получает только один элемент из списка
     домашних работ. В случае успеха функция возвращает подготовленную для
     отправки в Telegram строку, содержащую один из вердиктов словаря
     HOMEWORK_VERDICTS.
     """
-    if 'homework_name' not in homework.keys():
-        raise KeyError('Ключ \'homework_name\' не найден')
+    logging.debug('Извлечение статуса из информации о домашней работе...')
+    necessary_keys = ['homework_name', 'status']
+    missing_keys = []
+    for key in necessary_keys:
+        if key not in homework.keys():
+            missing_keys.append(key)
+    if missing_keys:
+        keys = '", "'.join(missing_keys)
+        raise KeyError(f'Не найдены ключи: "{keys}".')
     homework_name = homework['homework_name']
-    if 'status' not in homework.keys():
-        raise KeyError('Ключ \'status\' не найден')
     status = homework['status']
-    if homework.get('status') not in HOMEWORK_VERDICTS:
+    if status not in HOMEWORK_VERDICTS:
         raise ValueError(
-            f'Неожиданный статус домашней работы в ответе API: {status}'
+            f'Неожиданный статус домашней работы в ответе API: {status}.'
         )
     verdict = HOMEWORK_VERDICTS.get(status)
+    logging.debug('Статус домашней работы получен.')
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
@@ -134,26 +143,44 @@ def main():
     check_tokens()
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
-    LAST_ERROR = ''
+    last_verdict = ''
+    last_error = ''
     while True:
         try:
             response = get_api_answer(timestamp)
             homeworks = check_response(response)
-            if len(homeworks) > 0:
-                message = parse_status(homeworks[0])
-                timestamp = response.get('current_date')
+            if not homeworks:
+                logging.debug('Статус домашней работы не измененился.')
+                continue
+            message = parse_status(homeworks[0])
+            if message != last_verdict:
                 send_message(bot, message)
-            else:
-                logging.debug('Статус домашней работы не измененился')
+                last_verdict = message
+                timestamp = response.get('current_date', timestamp)
+        except (apihelper.ApiException, requests.exceptions.RequestException):
+            logging.error('Ошибка отправки сообщения.')
         except Exception as error:
             error_message = f'Сбой в работе программы: {error}'
-            if error_message != LAST_ERROR:
-                send_message(bot, error_message)
-                LAST_ERROR = error_message
-            logging.error(error_message)
+            if error_message != last_error:
+                with suppress(
+                    apihelper.ApiException,
+                    requests.exceptions.RequestException
+                ):
+                    send_message(bot, error_message)
+                    last_error = error_message
+            logging.exception(error_message)
         finally:
             time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        handlers=[logging.StreamHandler(sys.stdout)],
+        level=logging.DEBUG,
+        format=(
+            '%(asctime)s [%(levelname)s] '
+            '(%(filename)s::%(funcName)s[%(lineno)d]) %(message)s'
+        ),
+        encoding="UTF-8"
+    )
     main()
