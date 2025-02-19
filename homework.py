@@ -44,11 +44,11 @@ def check_tokens():
         if not var:
             empty_env_vars.append(name)
     if empty_env_vars:
-        for var in empty_env_vars:
-            error = (
-                f'Отсутствует обязательная переменная окружения: "{var}".'
-            )
-            logging.critical(error)
+        var = '", "'.join(empty_env_vars)
+        error = (
+            f'Отсутствует обязательная переменная окружения: "{var}".'
+        )
+        logging.critical(error)
         raise EmptyEnvironmentError('Программа принудительно остановлена.')
 
 
@@ -70,20 +70,20 @@ def get_api_answer(timestamp):
     В случае успешного запроса должна вернуть ответ API,
     приведя его из формата JSON к типам данных Python.
     """
-    logging.debug(f'Подготовка запроса к эндпоинту: {ENDPOINT} ...')
+    logging.debug(
+        f'Подготовка запроса ("from_date"={timestamp}) '
+        f'к эндпоинту: {ENDPOINT} ...'
+    )
     payload = {'from_date': f'{timestamp}'}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
     except requests.RequestException as error:
-        raise ConnectionError(
-            f'Ошибка доступа к Эндпоинту {ENDPOINT}: {error}'
-        )
+        raise ConnectionError(f'Ошибка доступа к эндпоинту: {error}')
     if response.status_code != HTTPStatus.OK:
         raise APIStatusError(
-            f'Эндпоинт {ENDPOINT} недоступен. '
-            f'Код ответа API: {response.status_code}.'
+            f'Эндпоинт недоступен. Код ответа API: {response.status_code}.'
         )
-    logging.debug(f'Получен ответ от эндпоинта: {ENDPOINT}')
+    logging.debug('Получен ответ от эндпоинта.')
     return response.json()
 
 
@@ -143,8 +143,7 @@ def main():
     check_tokens()
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
-    last_verdict = ''
-    last_error = ''
+    last_log_message = ''
     while True:
         try:
             response = get_api_answer(timestamp)
@@ -153,21 +152,25 @@ def main():
                 logging.debug('Статус домашней работы не измененился.')
                 continue
             message = parse_status(homeworks[0])
-            if message != last_verdict:
+            if message != last_log_message:
                 send_message(bot, message)
-                last_verdict = message
+                last_log_message = message
                 timestamp = response.get('current_date', timestamp)
-        except (apihelper.ApiException, requests.exceptions.RequestException):
-            logging.error('Ошибка отправки сообщения.')
+            else:
+                logging.debug(message)
+        except (
+            apihelper.ApiException, requests.exceptions.RequestException
+        ) as error:
+            logging.exception(error)
         except Exception as error:
             error_message = f'Сбой в работе программы: {error}'
-            if error_message != last_error:
+            if error_message != last_log_message:
                 with suppress(
                     apihelper.ApiException,
                     requests.exceptions.RequestException
                 ):
                     send_message(bot, error_message)
-                    last_error = error_message
+                    last_log_message = error_message
             logging.exception(error_message)
         finally:
             time.sleep(RETRY_PERIOD)
