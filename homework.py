@@ -2,10 +2,10 @@ import logging
 import os
 import sys
 import time
+from contextlib import suppress
 from http import HTTPStatus
 
 import requests
-from contextlib import suppress
 from dotenv import load_dotenv
 from telebot import TeleBot, apihelper
 
@@ -49,7 +49,9 @@ def check_tokens():
             f'Отсутствует обязательная переменная окружения: "{var}".'
         )
         logging.critical(error)
-        raise EmptyEnvironmentError('Программа принудительно остановлена.')
+        raise EmptyEnvironmentError(
+            f'{error} Программа принудительно остановлена.'
+        )
 
 
 def send_message(bot, message):
